@@ -6,6 +6,7 @@ from diffusers.utils import export_to_video, load_image
 from transformers import CLIPVisionModel
 from safetensors import safe_open
 from huggingface_hub import hf_hub_download
+from PIL import Image
 
 import warnings
 import gradio as gr
@@ -13,6 +14,33 @@ warnings.filterwarnings('ignore')
 
 CKPT_DIR = "../Wan2.1/Wan2.1-I2V-14B-720P"
 RESOLUTION_LIST = ['720*1280', '1280*720', '480*832', '832*480']
+
+def crop_image_ratio(img, target_aspect_ratio):
+    # Get original dimensions
+    original_width, original_height = img.size
+
+    # Calculate new dimensions for cropping
+    if original_height / original_width < target_aspect_ratio:
+        # Original image is wider than target, crop width
+        new_width = int(original_height / target_aspect_ratio)
+        new_height = original_height
+    else:
+        # Original image is taller than target, crop height
+        new_height = int(original_width * target_aspect_ratio)
+        new_width = original_width
+
+    # Calculate crop box coordinates for center crop
+    left = (original_width - new_width) / 2
+    upper = (original_height - new_height) / 2
+    right = left + new_width
+    lower = upper + new_height
+
+    # Ensure coordinates are integers
+    left, upper, right, lower = int(left), int(upper), int(right), int(lower)
+
+    # Perform the crop
+    cropped_image = img.crop((left, upper, right, lower))
+    return cropped_image
 
 # Button Functions
 def load_model() -> str:
@@ -69,27 +97,26 @@ def i2v_generation(prompt, image, resolution, fps, inference_steps, video_length
 
     try:
         print(f"Generating video with prompt: {prompt}")
-        print(f"Parameters: resolution={resolution}, steps={sd_steps}, guide_scale={guide_scale}, shift={shift_scale}, seed={seed}")
-        
-        max_area = resolution.split('*')[0] * resolution.split('*')[1]
-        aspect_ratio = image.height / image.width
-        mod_value = pipe.vae_scale_factor_spatial * pipe.transformer.config.patch_size[1]
-        height = round(np.sqrt(max_area * aspect_ratio)) // mod_value * mod_value
-        width = round(np.sqrt(max_area / aspect_ratio)) // mod_value * mod_value
-        image = image.resize((width, height), resample=Image.LANCZOS)
+        print(f"Parameters: resolution={resolution}, fps={fps}, inference_steps={inference_steps}, guide_scale={guide_scale}, video_length={video_length}, seed={seed}")
+
+        # crop to target aspect ratio then resize
+        target_width, target_height = map(int, resolution.split('*'))
+        target_ratio = target_height / target_width
+        cropped_image = crop_image_ratio(image, target_ratio)
+        resized_image = cropped_image.resize((target_width, target_height))
+        width, height = resized_image.size
         video_length = 5  # seconds, can be adjusted
         # Generate video
         video = pipe(
-            prompt,
-            image,
-            height=int(resolution.split('*')[0]),
-            width=int(resolution.split('*')[1]),
-            #shift=shift_scale,
+            prompt=prompt,
+            image=resized_image,
+            width=width,
+            height=height,
             num_frames=int(video_length * fps)+1,
             num_inference_steps=inference_steps,
-            guide_scale=guide_scale,
-            n_prompt=n_prompt,
-            seed=-1,  # Random seed
+            guidance_scale=guide_scale,
+            negative_prompt=n_prompt,
+            generator=torch.Generator(device="cpu")
         ).frames[0]
 
         # Save video
@@ -100,23 +127,23 @@ def i2v_generation(prompt, image, resolution, fps, inference_steps, video_length
         
         export_to_video(video, save_file, fps=16)
 
-        return save_file, "Video generated successfully!"
+        return save_file, cropped_image, "Video generated successfully!"
 
     except Exception as e:
         error_msg = f"Error during generation: {str(e)}"
         print(error_msg)
-        return None, error_msg
+        return None, None, error_msg
 
 
 # Gradio Interface
 def gradio_interface():
-    with gr.Blocks(title="Wan2.1 I2V-14B") as demo:
+    with gr.Blocks(title="Wan2.1 I2V-14B + CausVid LoRA") as demo:
         gr.Markdown("""
                     <div style="text-align: center; font-size: 32px; font-weight: bold; margin-bottom: 20px;">
-                        Wan2.1 (I2V-14B)
+                        Wan2.1 (I2V-14B + CausVid LoRA)
                     </div>
                     <div style="text-align: center; font-size: 16px; font-weight: normal; margin-bottom: 20px;">
-                        Text and Image to Video Generation with Wan I2V-14B Model
+                        Image to Video Generation with Wan I2V-14B Model + CausVid LoRA
                     </div>
                     """)
 
@@ -168,7 +195,7 @@ def gradio_interface():
                             step=1)
                         inference_steps = gr.Slider(
                             label="Inference Step",
-                            minimum=2,
+                            minimum=4,
                             maximum=100,
                             step=1,
                             value=8)
@@ -177,8 +204,8 @@ def gradio_interface():
                             label="frame per second",
                             minimum=8,
                             maximum=16,
-                            value=16.0,
-                            step=8)
+                            value=16,
+                            step=4)
                         seed = gr.Slider(
                             label="Seed",
                             minimum=-1,
@@ -193,7 +220,14 @@ def gradio_interface():
                     interactive=False, 
                     height=600
                 )
-                
+
+                cropped_image = gr.Image(
+                    label='Cropped Image',
+                    interactive=False,
+                    type="pil",
+                    elem_id="cropped_image",
+                    height=600)
+
                 generation_status = gr.Textbox(
                     label="Generation Status",
                     interactive=False
@@ -202,9 +236,9 @@ def gradio_interface():
         generate_btn.click(
             fn=i2v_generation,
             inputs=[
-                prompt, image, resolution, fps, inference_steps, video_length, guide_scale, n_prompt, seed
+                prompt_input, input_image, resolution, fps, inference_steps, video_length, guide_scale, n_prompt, seed
             ],
-            outputs=[output_video, generation_status]
+            outputs=[output_video, cropped_image, generation_status]
         )
 
     return demo
@@ -220,3 +254,4 @@ if __name__ == '__main__':
         server_port=7860,
         share=True
     )
+# %%

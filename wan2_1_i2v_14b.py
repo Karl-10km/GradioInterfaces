@@ -74,10 +74,8 @@ def i2v_generation(prompt, image, resolution, sd_steps, guide_scale, shift_scale
         )
 
         # Save video
-        #formatted_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-        #formatted_prompt = prompt.replace(" ", "_").replace("/", "_")[:50]
-        #save_file = f"i2v_14b_{size.replace('*','x')}_{formatted_prompt}_{formatted_time}.mp4"
-        save_file = "result.mp4"
+        formatted_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+        save_file = f"wan21_i2v_14b_{resolution.replace('*','x')}_{formatted_time}.mp4"
         
         cfg = WAN_CONFIGS['i2v-14B']
         cache_video(
