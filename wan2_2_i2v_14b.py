@@ -20,9 +20,6 @@ import wan
 from wan.configs import MAX_AREA_CONFIGS, SIZE_CONFIGS, WAN_CONFIGS, SUPPORTED_SIZES
 from wan.utils.utils import save_video
 
-# Global Variables
-wan_i2v_a14b = None
-
 def crop_image_ratio(img, target_aspect_ratio):
     # Get original dimensions
     original_width, original_height = img.size
@@ -76,10 +73,11 @@ def load_model():
             Convert DiT model parameters dtype to 'config.param_dtype'.
             Only works without FSDP.
     """
+    global wan_i2v_a14b
     try:
         print("Loading I2V-A14B model...", end='', flush=True)
         cfg = WAN_CONFIGS['i2v-A14B']
-        wan_ti2v_5b = wan.WanI2V(
+        wan_i2v_a14b = wan.WanI2V(
             config=cfg,
             checkpoint_dir='../Wan2.2/Wan2.2-I2V-A14B',
             device_id=0,
@@ -98,7 +96,7 @@ def load_model():
         return f"Error: {str(e)}"
 
 
-def i2v_generation(prompt, image, resolution, frame_num, sample_steps, 
+def i2v_generation(prompt, image, resolution, fps, frame_num, sample_steps, 
                    guide_scale, shift_scale, seed, n_prompt, sample_solver):
     if wan_i2v_a14b is None:
         return None, "Error: Model not loaded. Please load the model first."
@@ -111,28 +109,27 @@ def i2v_generation(prompt, image, resolution, frame_num, sample_steps,
 
     try:
         print(f"Generating video with prompt: {prompt}")
-        print(f"Parameters: resolution={resolution}, frame_num={frame_num}, steps={sample_steps}, guide_scale={guide_scale}, shift={shift_scale}, seed={seed}")
+        print(f"Parameters: resolution={resolution}, fps={fps}, frame_num={frame_num+1}, steps={sample_steps}, guide_scale={guide_scale}, shift={shift_scale}, seed={seed}")
         
         # crop to target aspect ratio then resize
         target_width, target_height = map(int, resolution.split('*'))
         target_ratio = target_height / target_width
         cropped_image = crop_image_ratio(image, target_ratio)
         resized_image = cropped_image.resize((target_width, target_height))
-        width, height = resized_image.size
+        print(f"width: {resized_image.width}, height: {resized_image.height}")
 
         # Generate video
         video = wan_i2v_a14b.generate(
             prompt,
-            img=image,
-            size=SIZE_CONFIGS[resolution],
+            resized_image,
             max_area=MAX_AREA_CONFIGS[resolution],
-            frame_num=frame_num,
+            frame_num=frame_num+1,
             shift=shift_scale,
-            sample_solver=sample_solver,
-            sampling_steps=sample_steps,
-            guide_scale=guide_scale,
-            n_prompt=n_prompt,
-            seed=seed,
+            #sample_solver=sample_solver,
+            #sampling_steps=sample_steps,
+            #guide_scale=guide_scale,
+            #n_prompt=n_prompt,
+            #seed=seed,
             offload_model=True
         )
 
@@ -141,11 +138,10 @@ def i2v_generation(prompt, image, resolution, frame_num, sample_steps,
         save_file = f"wan22_i2v_a14b__{formatted_time}.mp4"
         #save_file = "result.mp4"
         
-        cfg = WAN_CONFIGS['i2v-A14B']
         save_video(
             tensor=video[None],
             save_file=save_file,
-            fps=cfg.sample_fps,
+            fps=fps,
             nrow=1,
             normalize=True,
             value_range=(-1, 1)
@@ -156,7 +152,7 @@ def i2v_generation(prompt, image, resolution, frame_num, sample_steps,
     except Exception as e:
         error_msg = f"Error during generation: {str(e)}"
         print(error_msg)
-        return None, error_msg
+        return None, None, error_msg
 
 
 # Gradio Interface
@@ -205,21 +201,27 @@ def gradio_interface():
                             choices=list(SUPPORTED_SIZES['i2v-A14B']),
                             value="720*1280"
                         )
+                    with gr.Row():
+                        fps = gr.Slider(
+                            label="frame per second",
+                            minimum=8,
+                            maximum=32,
+                            value=16,
+                            step=2)
                         frame_num = gr.Slider(
                             label="Frame Number",
                             minimum=4,
                             maximum=120,
-                            value=72,
+                            value=80,
                             step=4,
                             info="24 FPS is recommended for smooth video generation. Adjust based on your needs."
-                        )
-                    
+                        )                    
                     with gr.Row():
                         sample_steps = gr.Slider(
                             label="Sampling Steps",
                             minimum=1,
                             maximum=100,
-                            value=50,
+                            value=40,
                             step=1
                         )
                         guide_scale = gr.Slider(
@@ -228,8 +230,7 @@ def gradio_interface():
                             maximum=20.0,
                             value=5.0,
                             step=0.5
-                        )
-                    
+                        )                 
                     with gr.Row():
                         shift_scale = gr.Slider(
                             label="Shift Scale",
@@ -244,8 +245,7 @@ def gradio_interface():
                             maximum=2147483647,
                             step=1,
                             value=-1
-                        )
-                    
+                        )                    
                     sample_solver = gr.Dropdown(
                         label="Sample Solver",
                         choices=["unipc", "dpm++"],
@@ -275,7 +275,7 @@ def gradio_interface():
         generate_btn.click(
             fn=i2v_generation,
             inputs=[
-                prompt_input, input_image, resolution, frame_num, sample_steps,
+                prompt_input, input_image, resolution, fps, frame_num, sample_steps,
                 guide_scale, shift_scale, seed, negative_prompt, sample_solver
             ],
             outputs=[output_video, resized_image, generation_status]
