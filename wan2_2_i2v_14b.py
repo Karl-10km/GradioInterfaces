@@ -9,6 +9,7 @@ import random
 import torch
 import gradio as gr
 from PIL import Image
+from image_process import crop_image_ratio
 
 warnings.filterwarnings('ignore')
 
@@ -19,33 +20,6 @@ sys.path.insert(0, osp.join(osp.dirname(__file__), '..', 'Wan2.2'))
 import wan
 from wan.configs import MAX_AREA_CONFIGS, SIZE_CONFIGS, WAN_CONFIGS, SUPPORTED_SIZES
 from wan.utils.utils import save_video
-
-def crop_image_ratio(img, target_aspect_ratio):
-    # Get original dimensions
-    original_width, original_height = img.size
-
-    # Calculate new dimensions for cropping
-    if original_height / original_width < target_aspect_ratio:
-        # Original image is wider than target, crop width
-        new_width = int(original_height / target_aspect_ratio)
-        new_height = original_height
-    else:
-        # Original image is taller than target, crop height
-        new_height = int(original_width * target_aspect_ratio)
-        new_width = original_width
-
-    # Calculate crop box coordinates for center crop
-    left = (original_width - new_width) / 2
-    upper = (original_height - new_height) / 2
-    right = left + new_width
-    lower = upper + new_height
-
-    # Ensure coordinates are integers
-    left, upper, right, lower = int(left), int(upper), int(right), int(lower)
-
-    # Perform the crop
-    cropped_image = img.crop((left, upper, right, lower))
-    return cropped_image
 
 # Button Functions
 def load_model():
@@ -125,11 +99,11 @@ def i2v_generation(prompt, image, resolution, fps, frame_num, sample_steps,
             max_area=MAX_AREA_CONFIGS[resolution],
             frame_num=frame_num+1,
             shift=shift_scale,
-            #sample_solver=sample_solver,
-            #sampling_steps=sample_steps,
-            #guide_scale=guide_scale,
-            #n_prompt=n_prompt,
-            #seed=seed,
+            sample_solver=sample_solver,
+            sampling_steps=sample_steps,
+            guide_scale=guide_scale,
+            n_prompt=n_prompt,
+            seed=seed,
             offload_model=True
         )
 

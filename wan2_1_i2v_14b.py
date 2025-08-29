@@ -6,6 +6,7 @@ import warnings
 from datetime import datetime
 
 import gradio as gr
+from PIL import Image
 
 warnings.filterwarnings('ignore')
 

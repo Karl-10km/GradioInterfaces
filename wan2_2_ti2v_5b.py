@@ -9,6 +9,8 @@ from datetime import datetime
 import random
 
 import gradio as gr
+from PIL import Image
+from image_process import crop_image_ratio
 
 warnings.filterwarnings('ignore')
 
@@ -21,10 +23,7 @@ from wan.configs import MAX_AREA_CONFIGS, SIZE_CONFIGS, WAN_CONFIGS, SUPPORTED_S
 from wan.utils.utils import save_video
 
 # Global Variables
-prompt_expander = None
 wan_ti2v_5b = None
-
-#python generate.py --task ti2v-5B --size 1280*704 --ckpt_dir ./Wan2.2-TI2V-5B --offload_model True --convert_model_dtype --t5_cpu --image examples/i2v_input.JPG --prompt "Summer beach vacation style, a white cat wearing sunglasses sits on a surfboard. The fluffy-furred feline gazes directly at the camera with a relaxed expression. Blurred beach scenery forms the background featuring crystal-clear waters, distant green hills, and a blue sky dotted with white clouds. The cat assumes a naturally relaxed posture, as if savoring the sea breeze and warm sunlight. A close-up shot highlights the feline's intricate details and the refreshing atmosphere of the seaside."
 
 # Button Functions
 def load_model():
@@ -66,14 +65,21 @@ def ti2v_generation(prompt, image, size, frame_num, sample_steps,
     try:
         print(f"Generating video with prompt: {prompt}")
         print(f"Parameters: size={size}, frame_num={frame_num}, steps={sample_steps}, guide_scale={guide_scale}, shift={shift_scale}, seed={seed}")
-        
+
+        # crop to target aspect ratio then resize
+        target_width, target_height = map(int, size.split('*'))
+        target_ratio = target_height / target_width
+        cropped_image = crop_image_ratio(image, target_ratio)
+        resized_image = cropped_image.resize((target_width, target_height))
+        print(f"width: {resized_image.width}, height: {resized_image.height}")
+
         # Generate video
         video = wan_ti2v_5b.generate(
             prompt,
-            img=image,
+            img=resized_image,
             size=SIZE_CONFIGS[size],
             max_area=MAX_AREA_CONFIGS[size],
-            frame_num=frame_num,
+            frame_num=frame_num+1,
             shift=shift_scale,
             sample_solver=sample_solver,
             sampling_steps=sample_steps,
