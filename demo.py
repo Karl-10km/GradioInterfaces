@@ -1,13 +1,44 @@
+import os
 import gradio as gr
+from PIL import Image
+from io import BytesIO, BufferedReader
+from typing import Optional, List, Dict, Tuple, Any
+
+from image_process import crop_image_ratio, crop_resize_image, byte2pil, pil2byte, base64encoder
+
 from dotenv import load_dotenv
+load_dotenv()
+apikey_replicate = os.getenv("REPLICATE_API_TOKEN")
+os.environ["REPLICATE_API_TOKEN"] = apikey_replicate
+import replicate
 
-def load_apis():
-    load_dotenv()
-    apikey_replicate = os.getenv("REPLICATE_API_TOKEN")
+def edit_image(image, models: str, prompt_select: str, prompt_input: str):
+    global image_edit_prompts
+    # crop and resize
+    img = crop_resize_image(image, 16/9, (720, 1280))
+    input = {}
+    pil_output = ""
 
-def edit_image(image, models, prompt_select, prompt_input):
-    # 이미지 편집 로직을 여기에 구현
-    return image  # 임시로 원본 이미지 반환
+    if models == "qwen/qwen-image-edit":
+        input = {
+            "image": f"data:image/png;base64,{base64encoder(img)}",
+            "prompt": prompt_input if len(prompt_input) > 0 else image_edit_prompts[prompt_select]
+        }
+    elif models == "google/nano-banana":
+        input = {
+            "image_input": [f"data:image/png;base64,{base64encoder(img)}"],
+            "prompt": prompt_input if len(prompt_input) > 0 else image_edit_prompts[prompt_select]
+        }
+
+    output = replicate.run(models, input=input)
+    if isinstance(output, list):
+        print("list")
+        output = output[0]
+    else:
+        print("not list")
+    pil_output = byte2pil(output)
+    
+    return pil_output
 
 def analyze_image(image, model, prompt):
     # 이미지 분석 로직을 여기에 구현
@@ -20,34 +51,46 @@ def generate_video(prompt):
     # 비디오 생성 로직을 여기에 구현
     return None  # 임시로 None 반환
 
+image_edit_prompts = {
+    "style(anime)": "Convert the uploaded photo into Japanese anime style art. Keep characters, background, and clothing similar to the original.",
+    "style(sketch)": "Convert to pencil sketch with natural graphite lines, cross-hatching, and visible paper texture while maintaining all background details and character features",
+    "style(oil)": "Transform to oil painting with visible brushstrokes, thick paint texture, and rich color depth while maintaining all background details and character features",
+    "style(water)": "Convert to watercolor painting with transparent colors, paper texture, and natural paint flow effects while maintaining all background details and character features"
+}
+
 # Gradio 인터페이스 생성
 def gradio_interface():
-    with gr.Blocks(title="AI Multi-Function Interface") as demo:
-        gr.Markdown("# AI Multi-Function Interface")
+    with gr.Blocks(title="Gen AI Multi-Function Interface") as demo:
+        gr.Markdown("# Gen AI Multi-Function Interface")
         
         # 첫 번째 행: 이미지 편집 섹션
         with gr.Row():
             with gr.Column(scale=1):
-                input_image_edit = gr.Image(label="Input: Image", height=480)
+                input_image_edit = gr.Image(label="Input: Image", 
+                                            type="pil",
+                                            height=480)
             
             with gr.Column(scale=1):
                 select_models = gr.Dropdown(
-                    choices=["Model 1", "Model 2", "Model 3"], 
+                    choices=["qwen/qwen-image-edit", "google/nano-banana", "Flux-Kontext-Pro"], 
                     label="Select: Models"
                 )
                 select_prompt_edit = gr.Dropdown(
-                    choices=["Prompt 1", "Prompt 2", "Prompt 3"], 
+                    choices=list(image_edit_prompts.keys()),#["Prompt 1", "Prompt 2", "Prompt 3"], 
                     label="Select: Prompt(to edit)"
                 )
                 input_prompt_edit = gr.Textbox(
                     label="Input: Prompt(to edit)", 
                     placeholder="편집할 프롬프트를 입력하세요",
+                    value=None,
                     lines=8
                 )
                 edit_button = gr.Button("Edit Image", variant="primary")
             
             with gr.Column(scale=1):
-                display_edited_image = gr.Image(label="Display: Image(Edited)", height=480)
+                display_edited_image = gr.Image(label="Display: Image(Edited)", 
+                                                type="pil",
+                                                height=480)
         
         # 두 번째 행: 선택 컨트롤들
         with gr.Row():
@@ -166,5 +209,5 @@ if __name__ == "__main__":
     demo.launch(
         #server_name='0.0.0.0',
         #server_port=7860,
-        share=True
+        #share=True
     )
